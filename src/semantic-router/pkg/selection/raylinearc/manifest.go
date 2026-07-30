@@ -418,16 +418,28 @@ func validateWorkerExecutionContract(worker *WorkerManifest) error {
 }
 
 func validateWorkerThinkingContract(worker *WorkerManifest) error {
-	if worker.ThinkingMode != "on" && worker.ThinkingMode != "off" {
-		return fmt.Errorf("worker %q thinking mode must be on or off", worker.ID)
+	if !validWorkerThinkingMode(worker.ThinkingMode) {
+		return fmt.Errorf(
+			"worker %q thinking mode must be on, off, high, or disabled",
+			worker.ID,
+		)
 	}
-	if worker.ThinkingMode == "on" && worker.ReasoningBudgetTokens == 0 {
+	if worker.UsesReasoning() && worker.ReasoningBudgetTokens == 0 {
 		return fmt.Errorf("worker %q thinking-on budget must be positive", worker.ID)
 	}
-	if worker.ThinkingMode == "off" && worker.ReasoningBudgetTokens != 0 {
+	if !worker.UsesReasoning() && worker.ReasoningBudgetTokens != 0 {
 		return fmt.Errorf("worker %q thinking-off budget must be zero", worker.ID)
 	}
 	return nil
+}
+
+func validWorkerThinkingMode(mode string) bool {
+	switch mode {
+	case "on", "off", "high", "disabled":
+		return true
+	default:
+		return false
+	}
 }
 
 func validateWorkerGenerationLimits(worker *WorkerManifest) error {
@@ -489,39 +501,70 @@ func validateWorkerExtraBody(worker *WorkerManifest) error {
 	return validateWorkerExtraMaxTokens(worker, extra)
 }
 
-func validateWorkerReasoningBody(
-	worker *WorkerManifest,
-	extra map[string]json.RawMessage,
-) error {
+type workerReasoningBody struct {
+	Enabled   *bool   `json:"enabled,omitempty"`
+	MaxTokens *uint64 `json:"max_tokens,omitempty"`
+	Effort    string  `json:"effort,omitempty"`
+	Exclude   *bool   `json:"exclude,omitempty"`
+}
+
+func validateWorkerReasoningBody(worker *WorkerManifest, extra map[string]json.RawMessage) error {
 	rawReasoning, exists := extra["reasoning"]
 	if !exists {
 		return fmt.Errorf("worker %q reasoning contract is required", worker.ID)
 	}
-	var reasoning struct {
-		Enabled   bool   `json:"enabled"`
-		MaxTokens uint64 `json:"max_tokens,omitempty"`
-		Effort    string `json:"effort,omitempty"`
-	}
+	var reasoning workerReasoningBody
 	if err := decodeStrictJSON(rawReasoning, &reasoning); err != nil {
 		return fmt.Errorf("worker %q reasoning contract is invalid", worker.ID)
 	}
-	if worker.ThinkingMode == "on" {
-		if !reasoning.Enabled ||
-			reasoning.MaxTokens != worker.ReasoningBudgetTokens ||
-			reasoning.Effort == "none" {
-			return fmt.Errorf(
-				"worker %q thinking-on reasoning contract does not match its budget",
-				worker.ID,
-			)
-		}
-	} else if reasoning.Enabled || reasoning.MaxTokens != 0 ||
-		(reasoning.Effort != "" && reasoning.Effort != "none") {
-		return fmt.Errorf(
-			"worker %q thinking-off reasoning contract must be disabled",
-			worker.ID,
-		)
+
+	switch worker.ThinkingMode {
+	case "on":
+		return validateThinkingOnReasoning(worker, reasoning)
+	case "high":
+		return validateThinkingHighReasoning(worker, reasoning)
+	default:
+		return validateThinkingDisabledReasoning(worker, reasoning)
 	}
-	return nil
+}
+
+func validateThinkingOnReasoning(worker *WorkerManifest, reasoning workerReasoningBody) error {
+	enabled := reasoning.Enabled != nil && *reasoning.Enabled
+	budgetMatches := reasoning.MaxTokens != nil &&
+		*reasoning.MaxTokens == worker.ReasoningBudgetTokens
+	if enabled && budgetMatches && reasoning.Effort != "none" {
+		return nil
+	}
+	return fmt.Errorf(
+		"worker %q thinking-on reasoning contract does not match its budget",
+		worker.ID,
+	)
+}
+
+func validateThinkingHighReasoning(worker *WorkerManifest, reasoning workerReasoningBody) error {
+	enabled := reasoning.Enabled == nil || *reasoning.Enabled
+	budgetMatches := reasoning.MaxTokens == nil ||
+		*reasoning.MaxTokens == worker.ReasoningBudgetTokens
+	if enabled && budgetMatches && reasoning.Effort == "high" {
+		return nil
+	}
+	return fmt.Errorf(
+		"worker %q thinking-high reasoning contract does not match its budget",
+		worker.ID,
+	)
+}
+
+func validateThinkingDisabledReasoning(worker *WorkerManifest, reasoning workerReasoningBody) error {
+	disabled := reasoning.Enabled == nil || !*reasoning.Enabled
+	budgetDisabled := reasoning.MaxTokens == nil || *reasoning.MaxTokens == 0
+	effortDisabled := reasoning.Effort == "" || reasoning.Effort == "none"
+	if disabled && budgetDisabled && effortDisabled {
+		return nil
+	}
+	return fmt.Errorf(
+		"worker %q disabled reasoning contract must be disabled",
+		worker.ID,
+	)
 }
 
 func validateWorkerReasoningEffort(
@@ -531,8 +574,8 @@ func validateWorkerReasoningEffort(
 	if rawEffort, exists := extra["reasoning_effort"]; exists {
 		var effort string
 		if err := json.Unmarshal(rawEffort, &effort); err != nil ||
-			(worker.ThinkingMode == "off" && effort != "none") ||
-			(worker.ThinkingMode == "on" && effort == "none") {
+			(!worker.UsesReasoning() && effort != "none") ||
+			(worker.UsesReasoning() && effort == "none") {
 			return fmt.Errorf(
 				"worker %q reasoning_effort conflicts with thinking mode",
 				worker.ID,

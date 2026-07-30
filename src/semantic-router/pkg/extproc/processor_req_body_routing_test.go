@@ -97,58 +97,8 @@ func TestHandleAutoModelRoutingPreservesSelectedModelHeaderAndRewritesUpstreamMo
 }
 
 func TestHandleAutoModelRoutingAppliesArtifactOwnedARCDispatch(t *testing.T) {
-	cfg := &config.RouterConfig{
-		BackendModels: config.BackendModels{
-			ModelConfig: map[string]config.ModelParams{
-				"arc-worker": {
-					PreferredEndpoints: []string{"openrouter"},
-					ExternalModelIDs: map[string]string{
-						"openai": "configured/model-must-not-win",
-					},
-				},
-			},
-			VLLMEndpoints: []config.VLLMEndpoint{
-				{
-					Name:                "openrouter",
-					Type:                "openai",
-					Model:               "arc-worker",
-					ProviderProfileName: "openrouter",
-					APIKey:              "artifact-owned-key",
-					APIKeyEnvName:       "ARC_TEST_PROVIDER_KEY",
-				},
-			},
-			ProviderProfiles: map[string]config.ProviderProfile{
-				"openrouter": {
-					Type:    "openai",
-					BaseURL: "https://openrouter.ai/api/v1",
-				},
-			},
-		},
-	}
-	router := &OpenAIRouter{
-		Config:             cfg,
-		CredentialResolver: newTestCredentialResolver(cfg),
-	}
-	requestContext := &RequestContext{
-		Headers:      map[string]string{},
-		TraceContext: context.Background(),
-		RaylineARCDispatch: &raylinearc.WorkerManifest{
-			ID:                              "arc-worker",
-			Model:                           "artifact/provider-model",
-			APIKeyEnv:                       "ARC_TEST_PROVIDER_KEY",
-			OpenRouterProviderOrder:         []string{"artifact-provider"},
-			OpenRouterRequireParameters:     true,
-			ThinkingMode:                    "on",
-			ReasoningBudgetTokens:           32_768,
-			EstimatedInputCostPerToken:      0.000001,
-			EstimatedCacheReadCostPerToken:  0.000001,
-			EstimatedCacheWriteCostPerToken: 0.000001,
-			EstimatedOutputCostPerToken:     0.000001,
-			ExtraBody: json.RawMessage(
-				`{"reasoning":{"enabled":true,"max_tokens":32768}}`,
-			),
-		},
-	}
+	router := newArtifactOwnedARCDispatchTestRouter()
+	requestContext := newArtifactOwnedARCDispatchTestContext()
 	openAIRequest := &openai.ChatCompletionNewParams{
 		Model: "MoM",
 		Messages: []openai.ChatCompletionMessageParamUnion{
@@ -177,6 +127,9 @@ func TestHandleAutoModelRoutingAppliesArtifactOwnedARCDispatch(t *testing.T) {
 	if headerMap[headers.SelectedModel] != "arc-worker" {
 		t.Fatalf("selected model header = %q", headerMap[headers.SelectedModel])
 	}
+	if headerMap[":path"] != "/api/v1/chat/completions" {
+		t.Fatalf("upstream path = %q", headerMap[":path"])
+	}
 	var body map[string]any
 	if err := json.Unmarshal(
 		requestBodyResponse.Response.BodyMutation.GetBody(),
@@ -194,6 +147,65 @@ func TestHandleAutoModelRoutingAppliesArtifactOwnedARCDispatch(t *testing.T) {
 	}
 	if requestContext.VSRReasoningMode != "on" {
 		t.Fatalf("reasoning telemetry = %q", requestContext.VSRReasoningMode)
+	}
+}
+
+func newArtifactOwnedARCDispatchTestRouter() *OpenAIRouter {
+	cfg := &config.RouterConfig{
+		BackendModels: config.BackendModels{
+			ModelConfig: map[string]config.ModelParams{
+				"arc-worker": {
+					PreferredEndpoints: []string{"openrouter"},
+					ExternalModelIDs: map[string]string{
+						"openai": "configured/model-must-not-win",
+					},
+				},
+			},
+			VLLMEndpoints: []config.VLLMEndpoint{
+				{
+					Name:                "openrouter",
+					Type:                "openai",
+					Model:               "arc-worker",
+					ProviderProfileName: "openrouter",
+					APIKey:              "artifact-owned-key",
+					APIKeyEnvName:       "ARC_TEST_PROVIDER_KEY",
+				},
+			},
+			ProviderProfiles: map[string]config.ProviderProfile{
+				"openrouter": {
+					Type:    "openai",
+					BaseURL: "https://openrouter.ai/api/v1",
+				},
+			},
+		},
+	}
+	return &OpenAIRouter{
+		Config:             cfg,
+		CredentialResolver: newTestCredentialResolver(cfg),
+	}
+}
+
+func newArtifactOwnedARCDispatchTestContext() *RequestContext {
+	return &RequestContext{
+		Headers:        map[string]string{},
+		TraceContext:   context.Background(),
+		ResponseAPICtx: &ResponseAPIContext{IsResponseAPIRequest: true},
+		RaylineARCDispatch: &raylinearc.WorkerManifest{
+			ID:                              "arc-worker",
+			Model:                           "artifact/provider-model",
+			APIKeyEnv:                       "ARC_TEST_PROVIDER_KEY",
+			OpenRouterProviderOrder:         []string{"artifact-provider"},
+			OpenRouterRequireParameters:     true,
+			ThinkingMode:                    "high",
+			ReasoningBudgetTokens:           32_768,
+			EstimatedInputCostPerToken:      0.000001,
+			EstimatedCacheReadCostPerToken:  0.000001,
+			EstimatedCacheWriteCostPerToken: 0.000001,
+			EstimatedOutputCostPerToken:     0.000001,
+			ExtraBody: json.RawMessage(
+				`{"reasoning":{"enabled":true,"max_tokens":32768}}`,
+			),
+		},
 	}
 }
 

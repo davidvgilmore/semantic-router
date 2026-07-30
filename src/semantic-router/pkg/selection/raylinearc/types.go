@@ -139,6 +139,13 @@ type WorkerManifest struct {
 	AttemptDeadlineSeconds          *float64        `json:"attempt_deadline_seconds"`
 }
 
+// UsesReasoning reports whether the artifact's thinking-mode vocabulary enables
+// reasoning. Runtime v2 artifacts use on/off, while runtime v3 artifacts use
+// high/disabled.
+func (worker WorkerManifest) UsesReasoning() bool {
+	return worker.ThinkingMode == "on" || worker.ThinkingMode == "high"
+}
+
 type PricingSnapshot struct {
 	ConfigPath                       string `json:"config_path"`
 	ConfigCommit                     string `json:"config_commit"`

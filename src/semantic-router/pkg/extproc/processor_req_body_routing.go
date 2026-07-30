@@ -516,7 +516,9 @@ func (r *OpenAIRouter) applyRoutingPathHeader(
 	ctx *RequestContext,
 	specifiedModel bool,
 ) (bool, *ext_proc.ProcessingResponse) {
-	if ctx.ResponseAPICtx != nil && ctx.ResponseAPICtx.IsResponseAPIRequest {
+	if ctx.ResponseAPICtx != nil &&
+		ctx.ResponseAPICtx.IsResponseAPIRequest &&
+		state.profile == nil {
 		state.setHeaders = append(state.setHeaders, &core.HeaderValueOption{
 			Header: &core.HeaderValue{
 				Key:      ":path",

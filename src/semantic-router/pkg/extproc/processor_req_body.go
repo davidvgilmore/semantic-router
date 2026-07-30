@@ -196,7 +196,7 @@ func (r *OpenAIRouter) handleAutoModelRouting(openAIRequest *openai.ChatCompleti
 
 	matchedModel := selectedModel
 	if ctx.RaylineARCDispatch != nil {
-		reasoningDecision.UseReasoning = ctx.RaylineARCDispatch.ThinkingMode == "on"
+		reasoningDecision.UseReasoning = ctx.RaylineARCDispatch.UsesReasoning()
 	}
 
 	if shortcut, done := r.autoRoutingShortcutResponse(

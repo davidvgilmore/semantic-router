@@ -237,7 +237,7 @@ func validARCDispatchReadinessFixture() (
 		{
 			ID:                              "worker",
 			Model:                           "provider/model",
-			ThinkingMode:                    "on",
+			ThinkingMode:                    "high",
 			APIKeyEnv:                       "ARC_TEST_PROVIDER_KEY",
 			EstimatedInputCostPerToken:      0.000001,
 			EstimatedCacheReadCostPerToken:  0.000002,

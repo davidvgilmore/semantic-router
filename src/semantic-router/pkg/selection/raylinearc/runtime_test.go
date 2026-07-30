@@ -166,6 +166,35 @@ func TestManifestRejectsInvalidWorkerDispatchContract(t *testing.T) {
 	}
 }
 
+func TestManifestAcceptsRuntimeV3ThinkingModes(t *testing.T) {
+	runtimeDir := writeSyntheticRuntime(t, func(
+		manifest *Manifest,
+		_ map[string]syntheticTensor,
+	) {
+		manifest.Workers[0].ThinkingMode = "high"
+		manifest.Workers[0].ReasoningBudgetTokens = 4_096
+		manifest.Workers[0].ExtraBody = json.RawMessage(
+			`{"reasoning":{"effort":"high","exclude":true}}`,
+		)
+		manifest.Workers[1].ThinkingMode = "disabled"
+		manifest.Workers[1].ExtraBody = json.RawMessage(
+			`{"reasoning":{"enabled":false,"effort":"none","exclude":false}}`,
+		)
+	})
+	runtime, err := LoadRuntime(runtimeDir)
+	if err != nil {
+		t.Fatalf("runtime v3 thinking modes were rejected: %v", err)
+	}
+	enabled, _ := runtime.Worker(0)
+	disabled, _ := runtime.Worker(1)
+	if !enabled.UsesReasoning() {
+		t.Fatal("high thinking mode did not enable reasoning")
+	}
+	if disabled.UsesReasoning() {
+		t.Fatal("disabled thinking mode enabled reasoning")
+	}
+}
+
 func TestRuntimeArtifactFromEnvironment(t *testing.T) {
 	runtimeDir := os.Getenv("RAYLINE_ARC_TEST_RUNTIME_DIR")
 	if runtimeDir == "" {
